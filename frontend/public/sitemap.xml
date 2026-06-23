@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://staynest.vercel.app/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://staynest.vercel.app/boys-pg</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://staynest.vercel.app/girls-pg</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://staynest.vercel.app/facilities</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://staynest.vercel.app/food</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://staynest.vercel.app/gallery</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://staynest.vercel.app/contact</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://staynest.vercel.app/register</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://staynest.vercel.app/booking</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://staynest.vercel.app/legal/privacy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://staynest.vercel.app/legal/terms</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://staynest.vercel.app/legal/refund</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+</urlset>
