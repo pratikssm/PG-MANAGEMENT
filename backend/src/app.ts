@@ -15,14 +15,41 @@ const app = express();
 app.set('trust proxy', 1);
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(
-  cors({
-    origin: env.clientUrl,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+
+// Enhanced CORS Configuration
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    const allowedOrigins = [
+      env.clientUrl,
+      'http://localhost:5173', // Local Vite dev server
+      'http://localhost:3000', // Alternative dev port
+      ...(env.isProd ? ['https://staynest.in'] : []), // Production domain
+    ];
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-CSRF-Token',
+    'Accept',
+    'Accept-Language',
+    'Content-Language',
+  ],
+  exposedHeaders: ['X-Total-Count', 'X-Page-Number', 'Authorization'],
+  maxAge: 86400, // 24 hours
+  preflightContinue: false,
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
 app.use(hpp());
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
