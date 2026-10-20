@@ -1,7 +1,7 @@
 import { Response } from 'express';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import User from '../models/User';
 import Otp from '../models/Otp';
-import Registration from '../models/Registration';
 import { AuthRequest } from '../middleware/auth';
 import { ApiResponse, AppError, asyncHandler } from '../utils/ApiResponse';
 import { signToken } from '../utils/jwt';
@@ -9,32 +9,51 @@ import { generateOtp, sendOtpEmail } from '../utils/email';
 import { env } from '../config/env';
 
 export const signup = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { name, email, password, phone } = req.body;
+  const { name, password } = req.body;
+  const email = String(req.body.email).trim().toLowerCase();
 
-  const existing = await User.findOne({ email });
-  if (existing) throw new AppError('Email already registered. Please log in.', 409);
+  const existing = await User.exists({ email });
+  if (existing) throw new AppError('An account already exists for this email. Please log in.', 409);
 
-  const user = await User.create({ name, email, password, phone, role: 'resident' });
-  const token = signToken({ id: user._id.toString(), role: user.role, email: user.email });
+  const challenge = await Otp.findOneAndUpdate(
+    { email, verifiedAt: { $ne: null }, consumedAt: null, expiresAt: { $gt: new Date() } },
+    { $set: { consumedAt: new Date() } },
+    { new: true },
+  );
+  if (!challenge) throw new AppError('Verify your email before creating an account.', 403);
 
-  setCookie(res, token);
-  res.status(201).json(ApiResponse.ok('Account created successfully', { token, user: sanitize(user) }));
+  try {
+    const user = await User.create({ name, email, password, role: 'resident', isEmailVerified: true });
+    res.status(201).json(ApiResponse.ok('Account created successfully. Please log in.', { user: sanitize(user) }));
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
+      throw new AppError('An account already exists for this email. Please log in.', 409);
+    }
+    throw error;
+  }
 });
 
 export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { email, password } = req.body;
+  const { password, role: expectedRole } = req.body;
+  const email = String(req.body.email).trim().toLowerCase();
 
   const user = await User.findOne({ email }).select('+password');
-  if (!user || !(await user.comparePassword(password))) {
+  if (!user || !(await user.comparePassword(password)) || !user.isEmailVerified || (expectedRole && user.role !== expectedRole)) {
     throw new AppError('Invalid email or password', 401);
   }
 
-  const token = signToken({ id: user._id.toString(), role: user.role, email: user.email });
+  const token = signToken({
+    id: user._id.toString(),
+    role: user.role,
+    email: user.email,
+    sessionVersion: user.sessionVersion,
+  });
   setCookie(res, token);
   res.json(ApiResponse.ok('Login successful', { token, user: sanitize(user) }));
 });
 
-export const logout = asyncHandler(async (_req: AuthRequest, res: Response) => {
+export const logout = asyncHandler(async (req: AuthRequest, res: Response) => {
+  await User.updateOne({ _id: req.user!.id }, { $inc: { sessionVersion: 1 } });
   res.clearCookie('token');
   res.json(ApiResponse.ok('Logged out successfully'));
 });
@@ -46,52 +65,75 @@ export const getMe = asyncHandler(async (req: AuthRequest, res: Response) => {
 });
 
 export const requestOtp = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { email } = req.body;
+  const email = String(req.body.email).trim().toLowerCase();
+  const existing = await User.findOne({ email }).select('isEmailVerified');
+  if (existing?.isEmailVerified) {
+    throw new AppError('An account already exists for this email. Please log in.', 409);
+  }
+  const recentlyRequested = await Otp.exists({
+    email,
+    createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+  });
+  if (recentlyRequested) throw new AppError('Please wait before requesting another verification code.', 429);
+
   const code = generateOtp();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const salt = randomBytes(16).toString('hex');
+  const codeHash = hashOtp(email, salt, code);
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
   await Otp.deleteMany({ email });
-  await Otp.create({ email, code, expiresAt });
+  await Otp.create({ email, codeHash, salt, expiresAt });
 
-  await sendOtpEmail(email, code);
-  res.json(ApiResponse.ok('OTP sent to your email'));
+  const sent = await sendOtpEmail(email, code);
+  if (!sent) {
+    await Otp.deleteMany({ email });
+    throw new AppError('Email delivery is not configured or failed. Please contact the site administrator.', 503);
+  }
+  res.json(ApiResponse.ok('If this email is eligible, a verification code has been sent.'));
 });
 
 export const verifyOtp = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { email, otp } = req.body;
+  const email = String(req.body.email).trim().toLowerCase();
+  const { otp } = req.body;
 
-  const record = await Otp.findOne({ email, isUsed: false });
-  if (!record) throw new AppError('No OTP found. Please request a new one.', 400);
-  if (record.expiresAt < new Date()) throw new AppError('OTP expired. Please request a new one.', 400);
-  if (record.code !== otp) throw new AppError('Invalid OTP', 400);
+  const record = await Otp.findOne({ email, consumedAt: null })
+    .select('+codeHash +salt')
+    .sort({ createdAt: -1 });
+  if (!record) throw new AppError('No active verification code found. Please request a new one.', 400);
+  if (record.expiresAt <= new Date()) {
+    await Otp.deleteOne({ _id: record._id });
+    throw new AppError('Verification code expired. Please request a new one.', 400);
+  }
+  if (record.verifiedAt) throw new AppError('This verification code has already been used.', 400);
 
-  record.isUsed = true;
-  await record.save();
+  const attempt = await Otp.findOneAndUpdate(
+    { _id: record._id, attempts: { $lt: 5 }, verifiedAt: null, consumedAt: null },
+    { $inc: { attempts: 1 } },
+    { new: true },
+  ).select('+codeHash +salt');
+  if (!attempt) throw new AppError('Too many verification attempts. Request a new code.', 429);
 
-  await User.updateOne({ email }, { isEmailVerified: true });
-  res.json(ApiResponse.ok('Email verified successfully'));
-});
-
-export const googleCallback = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { googleId, email, name, avatar } = req.body;
-
-  let user = await User.findOne({ $or: [{ googleId }, { email }] });
-  if (!user) {
-    user = await User.create({
-      name,
-      email,
-      googleId,
-      avatar,
-      phone: '',
-      isEmailVerified: true,
-      role: 'resident',
-    });
+  const suppliedHash = Buffer.from(hashOtp(email, attempt.salt, otp), 'hex');
+  const expectedHash = Buffer.from(attempt.codeHash, 'hex');
+  if (suppliedHash.length !== expectedHash.length || !timingSafeEqual(suppliedHash, expectedHash)) {
+    if (attempt.attempts >= 5) await Otp.deleteOne({ _id: attempt._id });
+    throw new AppError(attempt.attempts >= 5 ? ' verification attempts. Request a new code.' : 'Invalid verification code.', attempt.attempts >= 5 ? 429 : 400);
   }
 
-  const token = signToken({ id: user._id.toString(), role: user.role, email: user.email });
-  setCookie(res, token);
-  res.json(ApiResponse.ok('Google login successful', { token, user: sanitize(user) }));
+  const verified = await Otp.findOneAndUpdate(
+    { _id: attempt._id, verifiedAt: null, consumedAt: null },
+    { $set: { verifiedAt: new Date(), expiresAt: new Date(Date.now() + 15 * 60 * 1000) } },
+    { new: true },
+  );
+  if (!verified) throw new AppError('Verification code has already been used.', 400);
+
+  await User.updateOne({ email, isEmailVerified: false }, { $set: { isEmailVerified: true } });
+  res.json(ApiResponse.ok('Email verified. You can now create your account.'));
 });
+
+function hashOtp(email: string, salt: string, code: string): string {
+  return createHmac('sha256', env.jwtSecret).update(`${email}:${salt}:${code}`).digest('hex');
+}
 
 function setCookie(res: Response, token: string) {
   res.cookie('token', token, {

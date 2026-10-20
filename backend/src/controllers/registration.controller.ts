@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import Registration from '../models/Registration';
+import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { ApiResponse, AppError, asyncHandler } from '../utils/ApiResponse';
 import { sendRegistrationToOwner } from '../utils/whatsapp';
@@ -7,13 +8,31 @@ import { sendEmail } from '../utils/email';
 import { sendSMS } from '../utils/sms';
 
 export const createRegistration = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const reg = await Registration.create({ ...req.body, userId: req.user?.id });
+  const user = await User.findById(req.user!.id);
+  if (!user || user.role !== 'resident') throw new AppError('Only resident accounts can submit a registration.', 403);
+  const existing = await Registration.findOne({ userId: user._id });
+  if (existing) throw new AppError('A registration already exists for this account.', 409);
 
-  sendRegistrationToOwner(reg.toObject()).catch((e) => console.error('WhatsApp send error:', e));
+  let reg;
+  try {
+    reg = await Registration.create({ ...req.body, email: user.email, userId: user._id });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
+      throw new AppError('A registration already exists for this account.', 409);
+    }
+    throw error;
+  }
+  user.registrationId = reg._id;
+  await user.save();
 
-  const emailHtml = `<h2>Registration Received!</h2><p>Hi ${reg.fullName},</p><p>Your registration has been received. Our team will contact you within 24 hours.</p><p>Registration ID: ${reg._id}</p>`;
-  sendEmail(reg.email, 'StayNest - Registration Received', emailHtml).catch(() => {});
-  sendSMS(reg.mobile, 'StayNest: Registration received! Our team will contact you within 24 hours.').catch(() => {});
+  void sendRegistrationToOwner(reg.toObject()).catch((error) => console.error('WhatsApp registration notification failed:', error));
+
+  const safeName = reg.fullName.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]!);
+  const emailHtml = `<h2>Registration Received!</h2><p>Hi ${safeName},</p><p>Your registration has been received. Our team will contact you within 24 hours.</p><p>Registration ID: ${reg._id}</p>`;
+  void sendEmail(reg.email, 'StayNest - Registration Received', emailHtml).catch((error) => console.error('Registration email failed:', error));
+  void sendSMS(reg.mobile, 'StayNest: Registration received! Our team will contact you within 24 hours.').catch((error) => console.error('Registration SMS failed:', error));
 
   res.status(201).json(ApiResponse.ok('Registration submitted successfully', { registration: reg }));
 });
@@ -52,5 +71,6 @@ export const rejectRegistration = asyncHandler(async (req: AuthRequest, res: Res
 export const deleteRegistration = asyncHandler(async (req: AuthRequest, res: Response) => {
   const reg = await Registration.findByIdAndDelete(req.params.id);
   if (!reg) throw new AppError('Registration not found', 404);
+  if (reg.userId) await User.updateOne({ _id: reg.userId, registrationId: reg._id }, { $unset: { registrationId: 1 } });
   res.json(ApiResponse.ok('Registration deleted'));
 });

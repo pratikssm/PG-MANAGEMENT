@@ -1,62 +1,158 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, ChevronRight, CreditCard, Smartphone, Building2, CheckCircle2, Download } from 'lucide-react'
-import { useStore, updateDB } from '../lib/hooks'
+import { Check, ChevronRight, CreditCard, CheckCircle2, Download } from 'lucide-react'
+import { refreshAppData, reportApiError, useStore } from '../lib/hooks'
+import { apiRequest, downloadApiFile, normalizeDocument } from '../lib/api'
 import { type Invoice } from '../lib/store'
-import { MESS_CHARGES } from '../lib/data'
-import { formatINR, generateInvoiceNo } from '../lib/utils'
+import { LAUNDRY_CHARGES, MESS_CHARGES } from '../lib/data'
+import { formatINR } from '../lib/utils'
 import { Button, Card, Badge, Input } from '../components/ui'
 
 type Step = 1 | 2 | 3 | 4 | 5
+type CheckoutResponse = {
+  razorpay_order_id: string
+  razorpay_payment_id: string
+  razorpay_signature: string
+}
+type CheckoutOptions = {
+  key: string
+  amount: number
+  currency: string
+  name: string
+  description: string
+  order_id: string
+  prefill: { name: string; email: string; contact: string }
+  handler: (response: CheckoutResponse) => void
+  modal: { ondismiss: () => void }
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: CheckoutOptions) => { open: () => void }
+  }
+}
 
 export default function Booking() {
   const nav = useNavigate()
   const loc = useLocation()
   const db = useStore()
-  const initialRoom = (loc.state as any)?.roomId
+  const initialRoom = (loc.state as { roomId?: string } | null)?.roomId || ''
   const [step, setStep] = useState<Step>(initialRoom ? 2 : 1)
-  const [pg, setPg] = useState<'boys' | 'girls'>('boys')
-  const [roomId, setRoomId] = useState(initialRoom || '')
+  const [pg, setPg] = useState<'boys' | 'girls'>(() => db.rooms.find((room) => room.id === initialRoom)?.pg || 'boys')
+  const [roomId, setRoomId] = useState(initialRoom)
   const [mess, setMess] = useState(true)
   const [laundry, setLaundry] = useState(true)
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [payment, setPayment] = useState('upi')
-  const [paid, setPaid] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [error, setError] = useState('')
   const [invoice, setInvoice] = useState<Invoice | null>(null)
 
+  const resident = db.registrations.find((item) => item.id === db.user?.residentId)
+  const name = resident?.fullName || ''
+  const email = resident?.email || ''
+  const phone = resident?.mobile || ''
   const room = db.rooms.find((r) => r.id === roomId)
   const availableRooms = db.rooms.filter((r) => r.pg === pg && (r.totalBeds - r.occupiedBeds) > 0)
 
   const messAmt = mess ? MESS_CHARGES : 0
-  const laundryAmt = laundry ? 500 : 0
+  const laundryAmt = laundry ? LAUNDRY_CHARGES : 0
   const rent = room?.rent || 0
   const gst = Math.round((rent + messAmt + laundryAmt) * 0.18)
   const total = rent + messAmt + laundryAmt + gst
 
-  function pay() {
-    const inv: Invoice = {
-      id: `inv-${Date.now()}`, invoiceNo: generateInvoiceNo(),
-      residentId: `reg-${Date.now()}`, residentName: name || 'New Resident',
-      roomName: room?.name || '', roomRent: rent, messCharges: messAmt, laundryCharges: laundryAmt,
-      gst, total, status: 'paid', date: new Date().toISOString().slice(0, 10),
-      period: new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+  async function pay() {
+    if (!room || !resident) return
+    setError('')
+    setPaying(true)
+    try {
+      const script = document.createElement('script')
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+      script.async = true
+      await new Promise<void>((resolve, reject) => {
+        script.onload = () => resolve()
+        script.onerror = () => reject(new Error('Razorpay checkout could not be loaded. Please try again.'))
+        document.body.appendChild(script)
+      })
+      if (!window.Razorpay) throw new Error('Razorpay checkout is unavailable.')
+
+      const order = await apiRequest<{
+        orderId: string
+        amount: number
+        currency: string
+        keyId: string
+      }>('/payments/order', {
+        method: 'POST',
+        body: { roomId: room.id, mess, laundry },
+      })
+
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'StayNest',
+        description: `Room booking - ${room.name}`,
+        order_id: order.orderId,
+        prefill: { name, email, contact: phone },
+        handler: (response) => {
+          void apiRequest<{ invoice: Record<string, unknown> }>('/payments/verify', {
+            method: 'POST',
+            body: response,
+          }).then(async (result) => {
+            await refreshAppData()
+            setInvoice(normalizeDocument(result.invoice) as unknown as Invoice)
+            setStep(5)
+          }).catch((requestError) => {
+            setError(requestError instanceof Error ? requestError.message : 'Payment verification failed.')
+            reportApiError(requestError)
+          }).finally(() => setPaying(false))
+        },
+        modal: { ondismiss: () => setPaying(false) },
+      })
+      checkout.open()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to start payment.')
+      reportApiError(requestError)
+      setPaying(false)
     }
-    updateDB((d) => ({ ...d, invoices: [inv, ...d.invoices] }))
-    setInvoice(inv)
-    setPaid(true)
-    setStep(5)
   }
 
   const steps = ['Select PG', 'Choose Room', 'Add Services', 'Review', 'Confirmation']
+
+  if (db.loading) return <div className="pt-32 min-h-screen text-center text-slate-500">Loading booking details...</div>
+  if (!db.user || db.user.role !== 'resident') {
+    return (
+      <div className="pt-32 min-h-screen px-4 text-center">
+        <h1 className="text-2xl font-bold text-slate-900">Sign in to book a room</h1>
+        <p className="mt-2 text-slate-600">Create a resident account and submit your registration before booking.</p>
+        <div className="mt-6 flex justify-center gap-3"><Button onClick={() => nav('/login', { state: { from: '/booking' } })}>Sign in</Button><Button variant="outline" className="border-slate-300 text-slate-900" onClick={() => nav('/signup')}>Sign Up</Button></div>
+      </div>
+    )
+  }
+  if (!resident) {
+    return (
+      <div className="pt-32 min-h-screen px-4 text-center">
+        <h1 className="text-2xl font-bold text-slate-900">Complete your resident registration</h1>
+        <p className="mt-2 text-slate-600">A registration is required to create a booking and payment record.</p>
+        <Button className="mt-6" onClick={() => nav('/register')}>Continue registration</Button>
+      </div>
+    )
+  }
+  if (resident.status !== 'approved') {
+    return (
+      <div className="pt-32 min-h-screen px-4 text-center">
+        <h1 className="text-2xl font-bold text-slate-900">Application under review</h1>
+        <p className="mt-2 text-slate-600">Room booking and payments are available after your resident application is approved.</p>
+        <Button className="mt-6" onClick={() => nav('/resident')}>Check application status</Button>
+      </div>
+    )
+  }
 
   return (
     <div className="pt-16 min-h-screen bg-slate-50 py-12">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 text-center">Book Your Room</h1>
         <p className="mt-2 text-center text-slate-600">Complete your booking in 5 simple steps</p>
+        {error && <p role="alert" className="mt-4 rounded-lg bg-rose-50 p-3 text-center text-sm text-rose-700">{error}</p>}
 
         <div className="flex items-center justify-between my-8 max-w-2xl mx-auto">
           {steps.map((s, i) => (
@@ -101,9 +197,9 @@ export default function Booking() {
                 <h2 className="text-xl font-bold text-slate-900 mb-4">Add Services</h2>
                 <div className="space-y-3">
                   <label className="flex items-center justify-between p-4 rounded-xl border-2 border-slate-200 cursor-pointer hover:border-indigo-300"><div className="flex items-center gap-3"><input type="checkbox" checked={mess} onChange={(e) => setMess(e.target.checked)} className="w-5 h-5 accent-indigo-600" /><div><p className="font-medium text-slate-900">Mess Service</p><p className="text-xs text-slate-500">Daily breakfast, lunch & dinner</p></div></div><span className="font-bold text-slate-900">{formatINR(MESS_CHARGES)}/mo</span></label>
-                  <label className="flex items-center justify-between p-4 rounded-xl border-2 border-slate-200 cursor-pointer hover:border-indigo-300"><div className="flex items-center gap-3"><input type="checkbox" checked={laundry} onChange={(e) => setLaundry(e.target.checked)} className="w-5 h-5 accent-indigo-600" /><div><p className="font-medium text-slate-900">Laundry Service</p><p className="text-xs text-slate-500">Weekly wash & iron</p></div></div><span className="font-bold text-slate-900">{formatINR(500)}/mo</span></label>
+                  <label className="flex items-center justify-between p-4 rounded-xl border-2 border-slate-200 cursor-pointer hover:border-indigo-300"><div className="flex items-center gap-3"><input type="checkbox" checked={laundry} onChange={(e) => setLaundry(e.target.checked)} className="w-5 h-5 accent-indigo-600" /><div><p className="font-medium text-slate-900">Laundry Service</p><p className="text-xs text-slate-500">Weekly wash & iron</p></div></div><span className="font-bold text-slate-900">{formatINR(LAUNDRY_CHARGES)}/mo</span></label>
                 </div>
-                <div className="mt-6 grid sm:grid-cols-3 gap-4"><Input label="Full Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" /><Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@x.com" /><Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" /></div>
+                <div className="mt-6 grid sm:grid-cols-3 gap-4"><Input label="Full Name" value={name} readOnly /><Input label="Email" type="email" value={email} readOnly /><Input label="Phone" value={phone} readOnly /></div>
               </motion.div>
             )}
             {step === 4 && room && (
@@ -118,14 +214,9 @@ export default function Booking() {
                   <div className="flex justify-between py-3 text-lg font-bold"><span className="text-slate-900">Total</span><span className="text-indigo-600">{formatINR(total)}</span></div>
                 </div>
                 <div className="mt-6">
-                  <p className="font-semibold text-slate-900 mb-3">Payment Method</p>
-                  <div className="grid grid-cols-3 gap-3">
-                    {([['upi', Smartphone, 'UPI'], ['card', CreditCard, 'Card'], ['netbanking', Building2, 'Net Banking']] as const).map(([id, Icon, label]) => (
-                      <button key={id} onClick={() => setPayment(id)} className={`p-3 rounded-xl border-2 flex flex-col items-center gap-1.5 transition ${payment === id ? 'border-indigo-600 bg-indigo-50 text-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>
-                    ))}
-                  </div>
+                  <p className="text-sm text-slate-600">Choose UPI, card, or net banking in Razorpay's secure checkout.</p>
                 </div>
-                <Button onClick={pay} className="w-full mt-6" size="lg"><CreditCard className="w-5 h-5" /> Pay {formatINR(total)}</Button>
+                <Button onClick={() => void pay()} className="w-full mt-6" size="lg" disabled={paying}><CreditCard className="w-5 h-5" /> {paying ? 'Opening secure payment...' : `Pay ${formatINR(total)}`}</Button>
                 <p className="text-center text-xs text-slate-400 mt-2">Secured by Razorpay • 256-bit encryption</p>
               </motion.div>
             )}
@@ -147,12 +238,12 @@ export default function Booking() {
                     <div className="flex justify-between pt-2 border-t border-slate-100 text-base font-bold"><span>Total</span><span className="text-indigo-600">{formatINR(invoice.total)}</span></div>
                   </div>
                 </Card>
-                <div className="mt-6 flex gap-3 justify-center"><Button onClick={() => window.print()}><Download className="w-4 h-4" /> Download Invoice</Button><Button variant="outline" className="border-slate-300 text-slate-900" onClick={() => nav('/')}>Done</Button></div>
+                <div className="mt-6 flex gap-3 justify-center"><Button onClick={() => void downloadApiFile(`/invoices/${invoice.id}/pdf`, `invoice-${invoice.invoiceNo}.pdf`).catch(reportApiError)}><Download className="w-4 h-4" /> Download Invoice</Button><Button variant="outline" className="border-slate-300 text-slate-900" onClick={() => nav('/')}>Done</Button></div>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {step > 1 && step < 4 && !paid && (
+          {step > 1 && step < 4 && (
             <div className="mt-8 flex justify-between">
               <Button variant="ghost" onClick={() => setStep((s) => Math.max(1, s - 1) as Step)}>Back</Button>
               {step === 3 && <Button onClick={() => setStep(4)}>Review <ChevronRight className="w-4 h-4" /></Button>}

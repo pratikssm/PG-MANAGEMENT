@@ -6,15 +6,15 @@ import {
   Send, BarChart3, Check, X, Trash2, Download, TrendingUp, Home, DollarSign,
   AlertCircle, Mail, MessageCircle, FileSpreadsheet,
 } from 'lucide-react'
-import { useStore, updateDB, resetDB } from '../lib/hooks'
-import { type Registration, type Complaint } from '../lib/store'
+import type { LucideIcon } from 'lucide-react'
+import { useStore, refreshAppData, reportApiError } from '../lib/hooks'
+import { apiRequest, downloadApiFile } from '../lib/api'
 import { Button, Card, Badge, Select, Input, Textarea } from '../components/ui'
 import { formatINR, formatDate, downloadText } from '../lib/utils'
-import { PG_INFO, WEEKLY_MENU } from '../lib/data'
 
 type Tab = 'overview' | 'registrations' | 'rooms' | 'payments' | 'complaints' | 'laundry' | 'broadcast' | 'reports'
 
-const tabs: { id: Tab; label: string; icon: any }[] = [
+const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'registrations', label: 'Registrations', icon: Users },
   { id: 'rooms', label: 'Rooms', icon: BedDouble },
@@ -28,30 +28,45 @@ const tabs: { id: Tab; label: string; icon: any }[] = [
 export default function AdminDashboard() {
   const db = useStore()
   const [tab, setTab] = useState<Tab>('overview')
-  const [menuEdit, setMenuEdit] = useState(false)
+  const [waMessage, setWaMessage] = useState('')
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailMessage, setEmailMessage] = useState('')
 
   if (!db.user || db.user.role !== 'admin') return <Navigate to="/login" replace />
 
-  const totalRevenue = db.invoices.reduce((s, i) => s + i.total, 0)
+  const totalRevenue = db.invoices.filter((i) => i.status === 'paid').reduce((s, i) => s + i.total, 0)
   const pendingRegs = db.registrations.filter((r) => r.status === 'pending').length
   const openComplaints = db.complaints.filter((c) => c.status !== 'resolved').length
   const totalBeds = db.rooms.reduce((s, r) => s + r.totalBeds, 0)
   const occupiedBeds = db.rooms.reduce((s, r) => s + r.occupiedBeds, 0)
-  const occupancy = Math.round((occupiedBeds / totalBeds) * 100)
+  const occupancy = totalBeds ? Math.round((occupiedBeds / totalBeds) * 100) : 0
 
-  function approveReg(id: string) { updateDB((d) => ({ ...d, registrations: d.registrations.map((r) => r.id === id ? { ...r, status: 'approved' } : r) })) }
-  function rejectReg(id: string) { updateDB((d) => ({ ...d, registrations: d.registrations.map((r) => r.id === id ? { ...r, status: 'rejected' } : r) })) }
-  function deleteReg(id: string) { updateDB((d) => ({ ...d, registrations: d.registrations.filter((r) => r.id !== id) })) }
-  function setRoomPrice(id: string, rent: number) { updateDB((d) => ({ ...d, rooms: d.rooms.map((r) => r.id === id ? { ...r, rent, deposit: rent * 2 } : r) })) }
-  function setOccupancy(id: string, occ: number) { updateDB((d) => ({ ...d, rooms: d.rooms.map((r) => r.id === id ? { ...r, occupiedBeds: Math.min(occ, r.totalBeds) } : r) })) }
-  function resolveComplaint(id: string) { updateDB((d) => ({ ...d, complaints: d.complaints.map((c) => c.id === id ? { ...c, status: 'resolved' } : c) })) }
-  function assignComplaint(id: string, to: string) { updateDB((d) => ({ ...d, complaints: d.complaints.map((c) => c.id === id ? { ...c, status: 'assigned', assignedTo: to } : c) })) }
-  function updateLaundry(id: string, status: any) { updateDB((d) => ({ ...d, laundry: d.laundry.map((l) => l.id === id ? { ...l, status } : l) })) }
+  function runMutation(path: string, method: string, body?: unknown) {
+    void apiRequest(path, { method, body }).then(refreshAppData).catch(reportApiError)
+  }
+  function approveReg(id: string) { runMutation(`/registrations/${id}/approve`, 'PATCH') }
+  function rejectReg(id: string) { runMutation(`/registrations/${id}/reject`, 'PATCH') }
+  function deleteReg(id: string) { runMutation(`/registrations/${id}`, 'DELETE') }
+  function setRoomPrice(id: string, rent: number) { runMutation(`/rooms/${id}/pricing`, 'PATCH', { rent, deposit: rent * 2 }) }
+  function setOccupancy(id: string, occupiedBeds: number) { runMutation(`/rooms/${id}/occupancy`, 'PATCH', { occupiedBeds }) }
+  function resolveComplaint(id: string) { runMutation(`/complaints/${id}/resolve`, 'PATCH') }
+  function assignComplaint(id: string, assignedTo: string) { runMutation(`/complaints/${id}/assign`, 'PATCH', { assignedTo }) }
+  function updateLaundry(id: string, status: string) { runMutation(`/laundry/${id}`, 'PATCH', { status }) }
+
+  function sendBroadcast(channel: 'whatsapp' | 'email') {
+    const message = channel === 'whatsapp' ? waMessage : emailMessage
+    void apiRequest('/broadcast', {
+      method: 'POST',
+      body: { channel, message, subject: emailSubject },
+    }).then(() => {
+      setWaMessage('')
+      setEmailMessage('')
+      alert(`${channel === 'email' ? 'Email' : 'WhatsApp'} broadcast sent.`)
+    }).catch(reportApiError)
+  }
 
   function exportCSV() {
-    const headers = ['Invoice No', 'Resident', 'Room', 'Rent', 'Mess', 'Laundry', 'GST', 'Total', 'Status', 'Date']
-    const rows = db.invoices.map((i) => [i.invoiceNo, i.residentName, i.roomName, i.roomRent, i.messCharges, i.laundryCharges, i.gst, i.total, i.status, i.date])
-    downloadText('staynest-invoices.csv', [headers, ...rows].map((r) => r.join(',')).join('\n'))
+    void downloadApiFile('/invoices/export/csv', 'staynest-invoices.csv').catch(reportApiError)
   }
   function exportRegs() {
     const headers = ['Name', 'Email', 'Mobile', 'Gender', 'Aadhaar', 'Occupation', 'Room Pref', 'Status', 'Date']
@@ -74,7 +89,7 @@ export default function AdminDashboard() {
             <h1 className="text-3xl font-bold text-slate-900">Admin Dashboard</h1>
             <p className="text-slate-600">Welcome back, {db.user.name}</p>
           </div>
-          <Button variant="ghost" onClick={() => { if (confirm('Reset all demo data?')) resetDB() }} className="text-slate-500">Reset Demo Data</Button>
+          <Button variant="ghost" onClick={() => void refreshAppData().catch(reportApiError)} className="text-slate-500">Refresh data</Button>
         </div>
 
         <div className="flex gap-1 overflow-x-auto pb-2 mb-6">
@@ -150,8 +165,8 @@ export default function AdminDashboard() {
                     <Badge color={r.totalBeds - r.occupiedBeds > 0 ? 'green' : 'rose'}>{r.totalBeds - r.occupiedBeds} avail</Badge>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <label className="block"><span className="text-xs text-slate-500 font-medium">Rent (₹/mo)</span><input type="number" value={r.rent} onChange={(e) => setRoomPrice(r.id, Number(e.target.value))} className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-sm" /></label>
-                    <label className="block"><span className="text-xs text-slate-500 font-medium">Occupied / {r.totalBeds}</span><input type="number" min={0} max={r.totalBeds} value={r.occupiedBeds} onChange={(e) => setOccupancy(r.id, Number(e.target.value))} className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-sm" /></label>
+                    <label className="block"><span className="text-xs text-slate-500 font-medium">Rent (₹/mo)</span><input type="number" min={0} defaultValue={r.rent} onBlur={(e) => { const rent = Number(e.target.value); if (Number.isFinite(rent) && rent >= 0 && rent !== r.rent) setRoomPrice(r.id, rent) }} className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-sm" /></label>
+                    <label className="block"><span className="text-xs text-slate-500 font-medium">Occupied / {r.totalBeds}</span><input type="number" min={0} max={r.totalBeds} defaultValue={r.occupiedBeds} onBlur={(e) => { const occupied = Number(e.target.value); if (Number.isInteger(occupied) && occupied >= 0 && occupied <= r.totalBeds && occupied !== r.occupiedBeds) setOccupancy(r.id, occupied) }} className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-sm" /></label>
                   </div>
                   <p className="mt-3 text-xs text-slate-500">Deposit: {formatINR(r.deposit)}</p>
                 </Card>
@@ -219,14 +234,14 @@ export default function AdminDashboard() {
             <div className="grid lg:grid-cols-2 gap-6">
               <Card className="p-6">
                 <div className="flex items-center gap-2 mb-4"><MessageCircle className="w-5 h-5 text-emerald-500" /><h3 className="font-bold text-slate-900">WhatsApp Broadcast</h3></div>
-                <Textarea label="Message" rows={5} placeholder="Dear residents, tomorrow's menu has been updated..." defaultValue="" id="wa-msg" />
-                <Button className="mt-3 w-full bg-emerald-500 hover:bg-emerald-400" onClick={() => { const v = (document.getElementById('wa-msg') as HTMLTextAreaElement).value; window.open(`https://wa.me/${PG_INFO.whatsapp}?text=${encodeURIComponent(v)}`) }}><Send className="w-4 h-4" /> Send Broadcast</Button>
+                <Textarea label="Message" rows={5} placeholder="Dear residents, tomorrow's menu has been updated..." value={waMessage} onChange={(event) => setWaMessage(event.target.value)} />
+                <Button className="mt-3 w-full bg-emerald-500 hover:bg-emerald-400" disabled={!waMessage.trim()} onClick={() => sendBroadcast('whatsapp')}><Send className="w-4 h-4" /> Send Broadcast</Button>
               </Card>
               <Card className="p-6">
                 <div className="flex items-center gap-2 mb-4"><Mail className="w-5 h-5 text-indigo-500" /><h3 className="font-bold text-slate-900">Email Broadcast</h3></div>
-                <Input label="Subject" placeholder="Important announcement" id="email-sub" />
-                <div className="mt-3"><Textarea label="Body" rows={4} placeholder="Dear residents..." id="email-body" /></div>
-                <Button className="mt-3 w-full" onClick={() => alert('Email broadcast sent to all residents!')}><Send className="w-4 h-4" /> Send Email</Button>
+                <Input label="Subject" placeholder="Important announcement" value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
+                <div className="mt-3"><Textarea label="Body" rows={4} placeholder="Dear residents..." value={emailMessage} onChange={(event) => setEmailMessage(event.target.value)} /></div>
+                <Button className="mt-3 w-full" disabled={!emailMessage.trim() || !emailSubject.trim()} onClick={() => sendBroadcast('email')}><Send className="w-4 h-4" /> Send Email</Button>
               </Card>
             </div>
           )}

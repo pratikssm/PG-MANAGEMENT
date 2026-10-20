@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Sun, Moon, Coffee, UtensilsCrossed, Salad, Dumbbell, TrendingDown, HeartPulse, Check } from 'lucide-react'
-import { WEEKLY_MENU, DIET_PLANS, MESS_CHARGES, IMAGES } from '../lib/data'
-import { SectionHeading, Badge, Card } from '../components/ui'
+import type { LucideIcon } from 'lucide-react'
+import { DIET_PLANS, MESS_CHARGES, IMAGES } from '../lib/data'
+import { Badge, Card } from '../components/ui'
 import { formatINR } from '../lib/utils'
+import { useStore } from '../lib/hooks'
 
 const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const todayName = days[new Date().getDay()]
-const todayMenu = WEEKLY_MENU.find((m) => m.day === todayName) || WEEKLY_MENU[0]
-
-const dietIcons: Record<string, any> = { 'Veg Diet': Salad, 'Non-Veg Diet': UtensilsCrossed, 'Special Diet': HeartPulse, 'Gym Diet': Dumbbell, 'Weight Loss Diet': TrendingDown, 'Diabetic Diet': HeartPulse }
+const dietIcons: Record<string, LucideIcon> = { 'Veg Diet': Salad, 'Non-Veg Diet': UtensilsCrossed, 'Special Diet': HeartPulse, 'Gym Diet': Dumbbell, 'Weight Loss Diet': TrendingDown, 'Diabetic Diet': HeartPulse }
 
 export default function Food() {
   const [tab, setTab] = useState<'today' | 'weekly' | 'diets'>('today')
+  const { menu } = useStore()
+  const todayMenu = menu.find((m) => m.day === todayName)
   return (
     <div className="pt-16">
       <section className="relative h-[35vh] min-h-[280px] flex items-center justify-center overflow-hidden">
@@ -35,7 +37,7 @@ export default function Food() {
 
           {tab === 'today' && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid lg:grid-cols-3 gap-6">
-              {([['Breakfast', todayMenu.breakfast, Sun, '7:00 - 9:30 AM'], ['Lunch', todayMenu.lunch, UtensilsCrossed, '12:30 - 2:30 PM'], ['Dinner', todayMenu.dinner, Moon, '8:00 - 10:00 PM']] as const).map(([meal, items, Icon, time]) => (
+              {todayMenu ? ([['Breakfast', todayMenu.breakfast, Sun, '7:00 - 9:30 AM'], ['Lunch', todayMenu.lunch, UtensilsCrossed, '12:30 - 2:30 PM'], ['Dinner', todayMenu.dinner, Moon, '8:00 - 10:00 PM']] as const).map(([meal, items, Icon, time]) => (
                 <Card key={meal as string} className="overflow-hidden">
                   <div className="bg-gradient-to-br from-indigo-500 to-violet-500 p-5 text-white flex items-center justify-between">
                     <div><p className="text-sm opacity-90">{todayName}</p><h3 className="text-xl font-bold">{meal as string}</h3></div>
@@ -46,7 +48,7 @@ export default function Food() {
                     <p className="mt-2 text-slate-700 leading-relaxed">{items as string}</p>
                   </div>
                 </Card>
-              ))}
+              )) : <p className="lg:col-span-3 py-12 text-center text-slate-500">Today's menu is not available yet.</p>}
               <div className="lg:col-span-3 bg-gradient-to-r from-indigo-50 to-violet-50 rounded-3xl p-6 flex items-center justify-between flex-wrap gap-4">
                 <div><p className="text-sm text-slate-600">Monthly Mess Charges</p><p className="text-3xl font-bold text-slate-900">{formatINR(MESS_CHARGES)}<span className="text-sm font-normal text-slate-500">/month</span></p></div>
                 <Badge color="green"><Check className="w-3 h-3" /> Included in all plans</Badge>
@@ -64,7 +66,7 @@ export default function Food() {
                   <th className="text-left p-4 font-semibold"><span className="flex items-center gap-1.5"><Moon className="w-4 h-4 text-violet-500" /> Dinner</span></th>
                 </tr></thead>
                 <tbody>
-                  {WEEKLY_MENU.map((m) => (
+                  {menu.map((m) => (
                     <tr key={m.day} className={`border-t border-slate-100 ${m.day === todayName ? 'bg-indigo-50/50' : 'bg-white'}`}>
                       <td className="p-4 font-semibold text-slate-900">{m.day}{m.day === todayName && <Badge color="indigo" className="ml-2">Today</Badge>}</td>
                       <td className="p-4 text-slate-700">{m.breakfast}</td>

@@ -147,6 +147,7 @@ export const DIET_PLANS = [
 ]
 
 export const MESS_CHARGES = 3500
+export const LAUNDRY_CHARGES = 500
 
 export interface Testimonial {
   name: string
@@ -197,10 +198,16 @@ export const PG_INFO = {
   name: 'StayNest',
   fullName: 'StayNest Premium PG Management System',
   tagline: 'Premium Co-Living Spaces for Students & Professionals',
-  phone: '+91 98765 43210',
-  whatsapp: '919876543210',
-  email: 'hello@staynest.in',
-  address: '42, Knowledge Park, Sector 18, Noida, Uttar Pradesh 201301',
-  mapEmbed: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3503.074!2d77.3188!3d28.5244!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x390ce3c3abcdef%3A0x123!2sSector%2018%20Noida!5e0!3m2!1sen!2sin!4v1700000000000',
-  mapsLink: 'https://www.google.com/maps/search/?api=1&query=Sector+18+Noida',
-}
+
+  phone: '+91 9334644406',
+  whatsapp: '919334644406',
+  email: 'pratikssm8551@gmail.com',
+
+  address: '42, Vivek Vihar Yojana, Sector 14, Jodhpur, Rajasthan 342005',
+
+  mapEmbed:
+    'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3579.810458185228!2d73.03954829999999!3d26.2028434!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x39418b42ab7e9cc3%3A0xe62678eb9570deeb!2sSector%2014%20ph%20II%20kuri%20bhagtasani%20housing%20board!5e0!3m2!1sen!2sin!4v1782651828514!5m2!1sen!2sin',
+
+  mapsLink:
+    'https://www.google.com/maps/search/?api=1&query=Sector+14+ph+II+kuri+bhagtasani+housing+board+Jodhpur',
+};

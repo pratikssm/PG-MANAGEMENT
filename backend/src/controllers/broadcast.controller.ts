@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import Registration from '../models/Registration';
 import { AuthRequest } from '../middleware/auth';
-import { ApiResponse, asyncHandler } from '../utils/ApiResponse';
+import { ApiResponse, AppError, asyncHandler } from '../utils/ApiResponse';
 import { sendWhatsAppMessage } from '../utils/whatsapp';
 import { sendBroadcastEmail } from '../utils/email';
 import { sendSMS } from '../utils/sms';
@@ -15,21 +15,27 @@ export const sendBroadcast = asyncHandler(async (req: AuthRequest, res: Response
   if (channel === 'whatsapp') {
     for (const r of residents) {
       const phone = r.mobile.replace(/\D/g, '');
-      await sendWhatsAppMessage(phone, message);
+      if (!await sendWhatsAppMessage(phone, message)) {
+        throw new AppError(`WhatsApp broadcast stopped after a delivery failure. Successfully sent to ${residents.indexOf(r)} residents.`, 502);
+      }
     }
     return res.json(ApiResponse.ok(`WhatsApp broadcast sent to ${residents.length} residents`));
   }
 
   if (channel === 'email') {
     const emails = residents.map((r) => r.email).filter(Boolean);
-    await sendBroadcastEmail(emails, subject || 'StayNest Announcement', message);
+    if (!await sendBroadcastEmail(emails, subject || 'StayNest Announcement', message)) {
+      throw new AppError('Email broadcast could not be delivered to all residents. Check SMTP configuration and server logs.', 502);
+    }
     return res.json(ApiResponse.ok(`Email broadcast sent to ${emails.length} residents`));
   }
 
   if (channel === 'sms') {
     for (const r of residents) {
       const phone = r.mobile.replace(/\D/g, '');
-      await sendSMS(phone, message);
+      if (!await sendSMS(phone, message)) {
+        throw new AppError(`SMS broadcast stopped after a delivery failure. Successfully sent to ${residents.indexOf(r)} residents.`, 502);
+      }
     }
     return res.json(ApiResponse.ok(`SMS broadcast sent to ${residents.length} residents`));
   }

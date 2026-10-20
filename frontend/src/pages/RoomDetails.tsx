@@ -64,7 +64,7 @@ export default function RoomDetails() {
               </div>
               <div className="mt-5 flex gap-3">
                 <Button onClick={() => nav('/booking', { state: { roomId: room.id } })} className="flex-1" disabled={available === 0}>Book Now <ArrowRight className="w-4 h-4" /></Button>
-                <Link to="/register" className="flex-1"><Button variant="outline" className="w-full border-slate-300 text-slate-900 hover:bg-slate-100">Register</Button></Link>
+                <Link to="/signup" className="flex-1"><Button variant="outline" className="w-full border-slate-300 text-slate-900 hover:bg-slate-100">Create Account</Button></Link>
               </div>
             </Card>
 

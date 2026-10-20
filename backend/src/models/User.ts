@@ -13,6 +13,7 @@ export interface IUser extends Document {
   googleId?: string;
   isEmailVerified: boolean;
   registrationId?: mongoose.Types.ObjectId;
+  sessionVersion: number;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidate: string): Promise<boolean>;
@@ -22,13 +23,14 @@ const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    password: { type: String, minlength: 6, select: false },
-    phone: { type: String, required: true, trim: true },
+    password: { type: String, minlength: 8, select: false },
+    phone: { type: String, trim: true, default: '' },
     role: { type: String, enum: ['admin', 'resident'], default: 'resident' },
     avatar: { type: String },
     googleId: { type: String },
     isEmailVerified: { type: Boolean, default: false },
     registrationId: { type: Schema.Types.ObjectId, ref: 'Registration' },
+    sessionVersion: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

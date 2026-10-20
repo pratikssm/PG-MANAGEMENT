@@ -7,8 +7,9 @@ import { ApiResponse, AppError, asyncHandler } from '../utils/ApiResponse';
 export const getComplaints = asyncHandler(async (req: AuthRequest, res: Response) => {
   const filter: any = {};
   if (req.user!.role === 'resident') {
-    const reg = await Registration.findOne({ userId: req.user!.id });
-    filter.residentId = reg?._id;
+    const reg = await Registration.findOne({ userId: req.user!.id }).select('_id');
+    if (!reg) return res.json(ApiResponse.ok('Complaints fetched', { count: 0, complaints: [] }));
+    filter.residentId = reg._id;
   }
   const complaints = await Complaint.find(filter).sort({ createdAt: -1 });
   res.json(ApiResponse.ok('Complaints fetched', { count: complaints.length, complaints }));
@@ -31,7 +32,7 @@ export const assignComplaint = asyncHandler(async (req: AuthRequest, res: Respon
   const complaint = await Complaint.findByIdAndUpdate(
     req.params.id,
     { status: 'assigned', assignedTo },
-    { new: true }
+    { new: true, runValidators: true }
   );
   if (!complaint) throw new AppError('Complaint not found', 404);
   res.json(ApiResponse.ok('Complaint assigned', { complaint }));

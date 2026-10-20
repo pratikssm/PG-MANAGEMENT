@@ -15,7 +15,7 @@ export default function CTA() {
             <h2 className="text-3xl sm:text-5xl font-bold text-white tracking-tight">Ready to Find Your New Home?</h2>
             <p className="mt-4 text-lg text-indigo-100 leading-relaxed">Join 10,000+ happy residents at StayNest. Premium rooms, world-class amenities, and a community that feels like family. Book a visit today.</p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link to="/register"><Button size="lg">Register Now <ArrowRight className="w-5 h-5" /></Button></Link>
+              <Link to="/signup"><Button size="lg">Create Account <ArrowRight className="w-5 h-5" /></Button></Link>
               <a href={`https://wa.me/${PG_INFO.whatsapp}`} target="_blank"><Button variant="glass" size="lg"><MessageCircle className="w-5 h-5" /> WhatsApp</Button></a>
               <a href={`tel:${PG_INFO.phone}`}><Button variant="glass" size="lg"><Phone className="w-5 h-5" /> Call Us</Button></a>
             </div>

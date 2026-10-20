@@ -7,8 +7,9 @@ import { ApiResponse, AppError, asyncHandler } from '../utils/ApiResponse';
 export const getLaundryRequests = asyncHandler(async (req: AuthRequest, res: Response) => {
   const filter: any = {};
   if (req.user!.role === 'resident') {
-    const reg = await Registration.findOne({ userId: req.user!.id });
-    filter.residentId = reg?._id;
+    const reg = await Registration.findOne({ userId: req.user!.id }).select('_id');
+    if (!reg) return res.json(ApiResponse.ok('Laundry requests fetched', { count: 0, requests: [] }));
+    filter.residentId = reg._id;
   }
   const requests = await LaundryRequest.find(filter).sort({ createdAt: -1 });
   res.json(ApiResponse.ok('Laundry requests fetched', { count: requests.length, requests }));
@@ -31,7 +32,7 @@ export const updateLaundryStatus = asyncHandler(async (req: AuthRequest, res: Re
   const request = await LaundryRequest.findByIdAndUpdate(
     req.params.id,
     { status },
-    { new: true }
+    { new: true, runValidators: true }
   );
   if (!request) throw new AppError('Laundry request not found', 404);
   res.json(ApiResponse.ok('Laundry status updated', { request }));

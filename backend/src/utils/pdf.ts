@@ -75,8 +75,8 @@ export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     doc.moveTo(50, y).lineTo(545, y).strokeColor('#e2e8f0').stroke();
     y += 15;
     doc.fillColor('#94a3b8').fontSize(9).text('This is a computer-generated invoice and does not require a physical signature.', 50, y);
-    doc.fillColor('#94a3b8').text('StayNest Premium PG | 42, Knowledge Park, Sector 18, Noida, UP 201301', 50, y + 15);
-    doc.fillColor('#94a3b8').text('Phone: +91 98765 43210 | Email: hello@staynest.in', 50, y + 30);
+    doc.fillColor('#94a3b8').text('StayNest Premium PG | 42, Vivek Vihar Yojana, Sector 14, Jodhpur, RJ 342005', 50, y + 15);
+    doc.fillColor('#94a3b8').text('Phone: +91 9334644406 | Email: pratikssm8551@gmail.com', 50, y + 30);
 
     doc.end();
   });

@@ -1,19 +1,19 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, User, Receipt, UtensilsCrossed, WashingMachine,
   MessageSquare, Download, Check, Plus, BedDouble, CreditCard,
 } from 'lucide-react'
-import { useStore, updateDB } from '../lib/hooks'
-import { type Complaint, type LaundryRequest } from '../lib/store'
+import type { LucideIcon } from 'lucide-react'
+import { useStore, refreshAppData, reportApiError } from '../lib/hooks'
+import { apiRequest, downloadApiFile } from '../lib/api'
 import { Button, Card, Badge, Select, Input, Textarea } from '../components/ui'
 import { formatINR, formatDate } from '../lib/utils'
-import { WEEKLY_MENU } from '../lib/data'
 
 type Tab = 'overview' | 'profile' | 'payments' | 'meals' | 'laundry' | 'complaints'
 
-const tabs: { id: Tab; label: string; icon: any }[] = [
+const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'profile', label: 'Profile', icon: User },
   { id: 'payments', label: 'Payments', icon: Receipt },
@@ -24,10 +24,10 @@ const tabs: { id: Tab; label: string; icon: any }[] = [
 
 const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const todayName = days[new Date().getDay()]
-const todayMenu = WEEKLY_MENU.find((m) => m.day === todayName) || WEEKLY_MENU[0]
 
 export default function ResidentDashboard() {
   const db = useStore()
+  const todayMenu = db.menu.find((m) => m.day === todayName)
   const [tab, setTab] = useState<Tab>('overview')
   const [complaintForm, setComplaintForm] = useState({ category: 'food', subject: '', description: '' })
   const [laundryItems, setLaundryItems] = useState(5)
@@ -40,28 +40,52 @@ export default function ResidentDashboard() {
   const myLaundry = db.laundry.filter((l) => l.residentId === db.user?.residentId)
   const pendingDues = myInvoices.filter((i) => i.status !== 'paid').reduce((s, i) => s + i.total, 0)
 
-  function fileComplaint() {
+  if (!resident) return <Navigate to="/register" replace />
+
+  async function fileComplaint() {
     if (!complaintForm.subject || !resident) return
-    const c: Complaint = {
-      id: `cmp-${Date.now()}`, residentId: resident.id, residentName: resident.fullName,
-      category: complaintForm.category as any, subject: complaintForm.subject, description: complaintForm.description,
-      status: 'open', assignedTo: '', createdAt: new Date().toISOString(),
+    try {
+      await apiRequest('/complaints', { method: 'POST', body: complaintForm })
+      await refreshAppData()
+      setComplaintForm({ category: 'food', subject: '', description: '' })
+    } catch (error) {
+      reportApiError(error)
     }
-    updateDB((d) => ({ ...d, complaints: [c, ...d.complaints] }))
-    setComplaintForm({ category: 'food', subject: '', description: '' })
   }
 
-  function requestLaundry() {
+  async function requestLaundry() {
     if (!resident) return
-    const l: LaundryRequest = {
-      id: `lnd-${Date.now()}`, residentId: resident.id, residentName: resident.fullName,
-      items: laundryItems, status: 'requested', createdAt: new Date().toISOString(),
+    try {
+      await apiRequest('/laundry', { method: 'POST', body: { items: laundryItems } })
+      await refreshAppData()
+    } catch (error) {
+      reportApiError(error)
     }
-    updateDB((d) => ({ ...d, laundry: [l, ...d.laundry] }))
   }
 
-  function payNow(invoiceId: string) {
-    updateDB((d) => ({ ...d, invoices: d.invoices.map((i) => i.id === invoiceId ? { ...i, status: 'paid' } : i) }))
+  if (resident.status !== 'approved') {
+    const rejected = resident.status === 'rejected'
+    return (
+      <div className="pt-16 min-h-screen bg-slate-50 px-4 py-12">
+        <Card className="mx-auto max-w-2xl p-8 text-center">
+          <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full ${rejected ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-700'}`}>
+            {rejected ? <User className="h-8 w-8" /> : <LayoutDashboard className="h-8 w-8" />}
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900">Application {rejected ? 'Needs Attention' : 'Under Review'}</h1>
+          <p className="mt-3 text-slate-600">
+            {rejected
+              ? 'Your resident application was not approved. Please contact the StayNest team to discuss the next steps.'
+              : 'Your account is active, but your resident application is still pending. Resident services become available after approval.'}
+          </p>
+          <div className="mt-6 rounded-xl bg-slate-50 p-4 text-left text-sm text-slate-600">
+            <p><strong>Applicant:</strong> {resident.fullName}</p>
+            <p className="mt-1"><strong>Verified email:</strong> {db.user.email}</p>
+            <p className="mt-1"><strong>Status:</strong> <span className="capitalize">{resident.status}</span></p>
+          </div>
+          <Link to="/contact" className="mt-6 inline-flex"><Button>Contact StayNest</Button></Link>
+        </Card>
+      </div>
+    )
   }
 
   return (
@@ -89,11 +113,11 @@ export default function ResidentDashboard() {
               </div>
               <Card className="p-6">
                 <h3 className="font-bold text-slate-900 mb-4">Today's Menu</h3>
-                <div className="grid sm:grid-cols-3 gap-4">
+                {todayMenu ? <div className="grid sm:grid-cols-3 gap-4">
                   {[['Breakfast', todayMenu.breakfast], ['Lunch', todayMenu.lunch], ['Dinner', todayMenu.dinner]].map(([meal, items]) => (
                     <div key={meal} className="bg-slate-50 rounded-2xl p-4"><p className="font-semibold text-slate-900 text-sm">{meal}</p><p className="text-xs text-slate-600 mt-1">{items}</p></div>
                   ))}
-                </div>
+                </div> : <p className="text-sm text-slate-500">Today's menu is not available yet.</p>}
               </Card>
             </div>
           )}
@@ -129,7 +153,7 @@ export default function ResidentDashboard() {
                   </div>
                   <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
                     <p className="text-lg font-bold text-slate-900">Total: <span className="text-indigo-600">{formatINR(i.total)}</span></p>
-                    <div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => window.print()}><Download className="w-4 h-4" /> Invoice</Button>{i.status !== 'paid' && <Button size="sm" onClick={() => payNow(i.id)}><CreditCard className="w-4 h-4" /> Pay Now</Button>}</div>
+                    <div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => void downloadApiFile(`/invoices/${i.id}/pdf`, `invoice-${i.invoiceNo}.pdf`).catch(reportApiError)}><Download className="w-4 h-4" /> Invoice</Button>{i.status !== 'paid' && <span className="self-center text-xs text-slate-500">Contact the office to settle this invoice.</span>}</div>
                   </div>
                 </Card>
               ))}
@@ -140,17 +164,17 @@ export default function ResidentDashboard() {
             <div className="space-y-6">
               <Card className="p-6">
                 <h3 className="font-bold text-slate-900 mb-4">Today's Menu ({todayName})</h3>
-                <div className="grid sm:grid-cols-3 gap-4">
+                {todayMenu ? <div className="grid sm:grid-cols-3 gap-4">
                   {[['Breakfast', todayMenu.breakfast, '7:00 - 9:30 AM'], ['Lunch', todayMenu.lunch, '12:30 - 2:30 PM'], ['Dinner', todayMenu.dinner, '8:00 - 10:00 PM']].map(([meal, items, time]) => (
                     <div key={meal} className="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-2xl p-4"><p className="text-xs text-slate-500">{time}</p><p className="font-bold text-slate-900 mt-1">{meal}</p><p className="text-sm text-slate-600 mt-2">{items}</p></div>
                   ))}
-                </div>
+                </div> : <p className="text-sm text-slate-500">Today's menu is not available yet.</p>}
               </Card>
               <Card className="overflow-hidden">
                 <h3 className="font-bold text-slate-900 p-5 border-b border-slate-100">Weekly Menu</h3>
                 <div className="overflow-x-auto"><table className="w-full text-sm">
                   <thead><tr className="bg-slate-50 text-slate-600 text-left"><th className="p-3 font-semibold">Day</th><th className="p-3 font-semibold">Breakfast</th><th className="p-3 font-semibold">Lunch</th><th className="p-3 font-semibold">Dinner</th></tr></thead>
-                  <tbody>{WEEKLY_MENU.map((m) => (
+                  <tbody>{db.menu.map((m) => (
                     <tr key={m.day} className={`border-t border-slate-100 ${m.day === todayName ? 'bg-indigo-50/50' : ''}`}><td className="p-3 font-semibold text-slate-900">{m.day}</td><td className="p-3 text-slate-700">{m.breakfast}</td><td className="p-3 text-slate-700">{m.lunch}</td><td className="p-3 text-slate-700">{m.dinner}</td></tr>
                   ))}</tbody>
                 </table></div>

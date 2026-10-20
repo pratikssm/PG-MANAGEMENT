@@ -35,7 +35,7 @@ export interface IRegistration extends Document {
 
 const registrationSchema = new Schema<IRegistration>(
   {
-    userId: { type: Schema.Types.ObjectId, ref: 'User' },
+    userId: { type: Schema.Types.ObjectId, ref: 'User', unique: true, sparse: true },
     fullName: { type: String, required: true },
     parentName: { type: String, required: true },
     parentMobile: { type: String, required: true },

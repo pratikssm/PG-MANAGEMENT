@@ -11,22 +11,32 @@ npm install
 ```
 
 ### 2. Configure Environment
-```bash
-cp .env.example .env
+```powershell
+Copy-Item .env.example .env
 ```
-Open `.env` and fill in your credentials (see below for where to get each).
+Open `.env` and set `MONGO_URI` to your local MongoDB or Atlas connection string and replace `JWT_SECRET` with a random value (at least 32 characters in production). Razorpay keys are required to complete real test/live bookings; email, SMS, WhatsApp, and Cloudinary credentials are optional integrations.
 
 ### 3. Seed Database
 ```bash
 npm run seed
 ```
-This creates: Admin user, demo resident, 16 rooms, and weekly menu.
+This safely creates development-only demo accounts (outside production), 16 rooms, and the weekly menu. It is idempotent and does not clear existing collections.
 
 ### 4. Start Development Server
 ```bash
 npm run dev
 ```
 Server runs at `http://localhost:5000`
+
+### Frontend
+In a second terminal:
+```powershell
+cd frontend
+npm install
+Copy-Item .env.example .env
+npm run dev
+```
+The frontend is served at `http://localhost:5180` and uses the API URL in `frontend/.env`. Sign-in, registration, rooms, contact requests, dashboards, and payment verification use the MongoDB-backed API; there is no browser-side demo data store.
 
 ### 5. Production Build
 ```bash
@@ -36,7 +46,9 @@ npm start
 
 ---
 
-## 🔑 Default Credentials (after seed)
+## 🔑 Development demo credentials
+
+These demo accounts are created by `npm run seed` only when `NODE_ENV` is not `production`. They are not production credentials.
 
 | Role | Email | Password |
 |------|-------|----------|
@@ -47,16 +59,15 @@ npm start
 
 ## 🌐 API Endpoints
 
-### Auth (`/api/auth`)
+### Authentication (`/api/auth`)
 | Method | Route | Access | Description |
 |--------|-------|--------|-------------|
-| POST | `/signup` | Public | Register new user |
-| POST | `/login` | Public | Login with email/password |
-| POST | `/logout` | Public | Clear auth cookie |
+| POST | `/otp/request` | Public, rate-limited | Send a five-minute email verification code |
+| POST | `/otp/verify` | Public, rate-limited | Verify the one-time email code |
+| POST | `/signup` | Public, rate-limited | Create an account after email verification |
+| POST | `/login` | Public, rate-limited | Login with verified email/password |
+| POST | `/logout` | Auth | Invalidate the current session and clear auth cookie |
 | GET | `/me` | Auth | Get current user |
-| POST | `/otp/request` | Public | Request email OTP |
-| POST | `/otp/verify` | Public | Verify email OTP |
-| POST | `/google` | Public | Google OAuth login |
 
 ### Rooms (`/api/rooms`)
 | Method | Route | Access | Description |
@@ -72,7 +83,7 @@ npm start
 ### Registrations (`/api/registrations`)
 | Method | Route | Access | Description |
 |--------|-------|--------|-------------|
-| POST | `/` | Public | Submit registration (sends WhatsApp + Email + SMS) |
+| POST | `/` | Resident | Submit a registration linked to the signed-in account (sends WhatsApp + Email + SMS) |
 | GET | `/` | Admin | List all registrations |
 | GET | `/me` | Resident | Get my registration |
 | PATCH | `/:id/approve` | Admin | Approve registration |
@@ -173,21 +184,27 @@ npm start
 3. Get Phone Number ID & Access Token
 4. Paste into `.env`
 
-### Email SMTP (Optional, for OTP & notifications)
-1. Use Gmail: Enable 2FA → Generate App Password
-2. Or use services like SendGrid, Mailgun
-3. Fill `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
+### Brevo transactional email (recommended and required for account signup)
+1. In Brevo, create an API key from **Settings → SMTP & API → API keys**. Use the API key with the HTTP API integration (not an SMTP key).
+2. Add a sender under **Settings → Senders, Domains, IPs → Senders** and complete sender verification. Authenticate your domain with the DNS records Brevo provides when possible.
+3. Set `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` (must be the verified sender), and optionally `BREVO_SENDER_NAME` in `backend/.env`.
+4. Restart the backend and request an OTP. OTPs are never returned by the API; check Brevo transactional logs for delivery status.
+5. Existing SMTP settings remain available as a fallback if Brevo is not configured.
 
 ### Twilio SMS (Optional)
 1. Go to https://twilio.com → Sign up
 2. Get Account SID, Auth Token, Phone Number
 3. Paste into `.env`
 
-### Google OAuth (Optional)
-1. Go to https://console.cloud.google.com
-2. Create project → Enable Google+ API
-3. Create OAuth 2.0 credentials
-4. Paste Client ID & Secret into `.env`
+### Signup and resident application flow
+1. Visitors can browse public pages without an account.
+2. `/signup` sends and verifies an email OTP, then creates an account; it does not create a resident application or log the user in.
+3. The user logs in and is directed to `/register` to complete the existing resident application.
+4. The backend associates the application with the authenticated account and uses the account email; the email sent in the request is ignored.
+5. Pending/rejected applications can see their status, while resident services and booking require admin approval.
+6. Demo admin/resident accounts are created only when running the seed script outside production. Create production admin accounts through a controlled deployment process.
+
+Passwords must be at least 8 characters and contain uppercase, lowercase, and numeric characters. OTPs expire after five minutes, are stored as keyed hashes, allow at most five verification attempts, and can be requested at most once per minute (with additional IP rate limits). On backend startup, legacy OTP records containing plaintext codes are deleted; other account, room, and registration data is untouched.
 
 ---
 

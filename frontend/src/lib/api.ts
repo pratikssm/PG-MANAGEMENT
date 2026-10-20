@@ -1,5 +1,5 @@
 // API Configuration and Client Setup
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '');
 
 interface ApiRequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
@@ -29,10 +29,10 @@ async function apiCall<T>(
   }
 
   const token = localStorage.getItem('authToken');
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...fetchOptions.headers,
-  };
+  const headers: Record<string, string> = Object.fromEntries(
+    new Headers(fetchOptions.headers).entries()
+  );
+  headers['Content-Type'] = 'application/json';
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -66,7 +66,7 @@ export const api = {
   // Auth endpoints
   auth: {
     register: (payload: any) => apiCall('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
-    login: (payload: any) => apiCall('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+    login: (payload: any) => apiCall<{ token: string; user: Record<string, unknown> }>('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
     logout: () => apiCall('/auth/logout', { method: 'POST' }),
     me: () => apiCall('/auth/me', { method: 'GET' }),
     requestOtp: (phone: string) => apiCall('/auth/request-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
@@ -163,3 +163,98 @@ export const api = {
 };
 
 export default api;
+import type { AuthUser } from './store'
+
+const TOKEN_KEY = 'staynest_auth_token'
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+type ApiEnvelope<T> = {
+  success: boolean
+  message: string
+  data?: T
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: { method?: string; body?: unknown; headers?: HeadersInit } = {},
+): Promise<T> {
+  const headers = new Headers(options.headers)
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (options.body !== undefined) headers.set('Content-Type', 'application/json')
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: options.method || 'GET',
+      headers,
+      credentials: 'include',
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    })
+  } catch {
+    throw new ApiError(`Cannot connect to the StayNest API at ${API_BASE_URL}.`, 0)
+  }
+
+  const payload = await response.json().catch(() => null) as ApiEnvelope<T> | null
+  if (!response.ok || !payload?.success) {
+    throw new ApiError(payload?.message || `Request failed (${response.status}).`, response.status)
+  }
+  return payload.data as T
+}
+
+export async function downloadApiFile(path: string, filename: string) {
+  const headers = new Headers()
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { headers, credentials: 'include' })
+  } catch {
+    throw new ApiError(`Cannot connect to the StayNest API at ${API_BASE_URL}.`, 0)
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { message?: string } | null
+    throw new ApiError(payload?.message || `Download failed (${response.status}).`, response.status)
+  }
+
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function setToken(token: string | null) {
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
+}
+
+export function normalizeDocument<T extends Record<string, unknown>>(document: T): T & { id: string } {
+  const rawId = document._id
+  return {
+    ...document,
+    id: String(rawId ?? document.id ?? ''),
+  } as T & { id: string }
+}
+
+export function normalizeUser(user: Record<string, unknown>): AuthUser {
+  return {
+    id: String(user.id ?? user._id ?? ''),
+    name: String(user.name ?? ''),
+    email: String(user.email ?? ''),
+    role: user.role === 'admin' ? 'admin' : 'resident',
+    residentId: user.registrationId ? String(user.registrationId) : undefined,
+  }
+}

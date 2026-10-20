@@ -13,10 +13,19 @@ function genInvoiceNo(): string {
   return `SN-${ts}${rand}`;
 }
 
+async function getResidentId(req: AuthRequest) {
+  const registration = await Registration.findOne({ userId: req.user!.id }).select('_id');
+  return registration?._id;
+}
+
 export const getInvoices = asyncHandler(async (req: AuthRequest, res: Response) => {
   const filter: any = {};
   if (req.user!.role === 'resident') {
-    filter.residentId = req.user!.id;
+    const residentId = await getResidentId(req);
+    if (!residentId) {
+      return res.json(ApiResponse.ok('Invoices fetched', { count: 0, invoices: [] }));
+    }
+    filter.residentId = residentId;
   }
   const invoices = await Invoice.find(filter).sort({ createdAt: -1 });
   res.json(ApiResponse.ok('Invoices fetched', { count: invoices.length, invoices }));
@@ -25,7 +34,8 @@ export const getInvoices = asyncHandler(async (req: AuthRequest, res: Response) 
 export const getInvoiceById = asyncHandler(async (req: AuthRequest, res: Response) => {
   const invoice = await Invoice.findById(req.params.id);
   if (!invoice) throw new AppError('Invoice not found', 404);
-  if (req.user!.role === 'resident' && invoice.residentId.toString() !== req.user!.id) {
+  const residentId = req.user!.role === 'resident' ? await getResidentId(req) : undefined;
+  if (req.user!.role === 'resident' && (!residentId || invoice.residentId.toString() !== residentId.toString())) {
     throw new AppError('Not authorized to view this invoice', 403);
   }
   res.json(ApiResponse.ok('Invoice fetched', { invoice }));
@@ -61,6 +71,10 @@ export const createInvoice = asyncHandler(async (req: AuthRequest, res: Response
 export const downloadInvoicePdf = asyncHandler(async (req: AuthRequest, res: Response) => {
   const invoice = await Invoice.findById(req.params.id);
   if (!invoice) throw new AppError('Invoice not found', 404);
+  const residentId = req.user!.role === 'resident' ? await getResidentId(req) : undefined;
+  if (req.user!.role === 'resident' && (!residentId || invoice.residentId.toString() !== residentId.toString())) {
+    throw new AppError('Not authorized to download this invoice', 403);
+  }
 
   const pdfBuffer = await generateInvoicePdf({
     invoiceNo: invoice.invoiceNo,

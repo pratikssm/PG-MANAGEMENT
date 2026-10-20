@@ -21,7 +21,7 @@ export const getRooms = asyncHandler(async (req: AuthRequest, res: Response) => 
 });
 
 export const getRoomById = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const room = await Room.findById(req.params.id);
+  const room = await Room.findOne({ _id: req.params.id, isActive: true });
   if (!room) throw new AppError('Room not found', 404);
   res.json(ApiResponse.ok('Room fetched', { room }));
 });
@@ -45,7 +45,7 @@ export const deleteRoom = asyncHandler(async (req: AuthRequest, res: Response) =
 
 export const updatePricing = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { rent, deposit } = req.body;
-  const room = await Room.findByIdAndUpdate(req.params.id, { rent, deposit }, { new: true });
+  const room = await Room.findByIdAndUpdate(req.params.id, { rent, deposit }, { new: true, runValidators: true });
   if (!room) throw new AppError('Room not found', 404);
   res.json(ApiResponse.ok('Pricing updated', { room }));
 });
@@ -55,6 +55,9 @@ export const updateOccupancy = asyncHandler(async (req: AuthRequest, res: Respon
   const room = await Room.findById(req.params.id);
   if (!room) throw new AppError('Room not found', 404);
   if (occupiedBeds > room.totalBeds) throw new AppError('Occupied beds cannot exceed total beds', 400);
+  if (!Number.isInteger(occupiedBeds) || occupiedBeds < 0) {
+    throw new AppError('Occupied beds must be a non-negative whole number', 400);
+  }
   room.occupiedBeds = occupiedBeds;
   await room.save();
   res.json(ApiResponse.ok('Occupancy updated', { room }));

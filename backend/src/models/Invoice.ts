@@ -33,7 +33,7 @@ const invoiceSchema = new Schema<IInvoice>(
     gst: { type: Number, default: 0 },
     total: { type: Number, required: true },
     status: { type: String, enum: ['paid', 'pending', 'overdue'], default: 'pending' },
-    paymentId: { type: String },
+    paymentId: { type: String, unique: true, sparse: true },
     paymentMethod: { type: String },
     date: { type: String, required: true },
     period: { type: String, required: true },

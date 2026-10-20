@@ -22,8 +22,8 @@ export const PG_INFO = {
   name: 'StayNest',
   fullName: 'StayNest Premium PG Management System',
   tagline: 'Premium Co-Living Spaces for Students & Professionals',
-  phone: '+91 98765 43210',
-  whatsapp: '919876543210',
-  email: 'hello@staynest.in',
-  address: '42, Knowledge Park, Sector 18, Noida, Uttar Pradesh 201301',
+  phone: '+91 9334644406',
+  whatsapp: '919334644406',
+  email: 'pratikssm8551@gmail.com',
+  address: '42, Vivek Vihar Yojana, Sector 14, Jodhpur, Rajasthan 342005',
 };
