@@ -24,6 +24,7 @@ const corsOptions = {
         .split(',')
         .map((url) => url.trim().replace(/\/$/, ''))
         .filter(Boolean),
+      'https://pg-management-ebon.vercel.app',
       'http://localhost:5173', // Local Vite dev server
       'http://localhost:3000', // Alternative dev port
       ...(env.isProd ? ['https://staynest.in'] : []), // Production domain

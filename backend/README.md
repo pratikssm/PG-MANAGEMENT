@@ -294,10 +294,10 @@ VITE_API_URL=https://your-render-service.onrender.com/api
 
 For this deployment, the values should be:
 
-- **Render `CLIENT_URL`:** `https://pg-management-8fb6fhlzr-pratikssms-projects.vercel.app`
+- **Render `CLIENT_URL`:** `https://pg-management-ebon.vercel.app`
 - **Vercel `VITE_API_URL`:** `https://staynest-backend-lslj.onrender.com/api`
 
-`CLIENT_URL` must match the frontend's browser origin exactly. If you also use a stable Vercel domain or another frontend domain, add it to `CLIENT_URL` separated by a comma. After changing environment variables, redeploy the affected service so the new configuration is loaded.
+The stable `pg-management-ebon.vercel.app` domain is explicitly allowed by backend CORS. `CLIENT_URL` can also contain additional exact frontend origins separated by commas (for example, the Vercel Git branch domain). Do not add a page path such as `/login` or an API path such as `/api`. After changing environment variables, redeploy the affected service so the new configuration is loaded.
 
 Example API call:
 ```typescript
