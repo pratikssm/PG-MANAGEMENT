@@ -280,16 +280,24 @@ backend/
    - **Build Command:** `npm install && npm run build`
    - **Start Command:** `npm start`
    - **Environment Variables:** Add all from `.env`
+   - Set `CLIENT_URL` to the exact Vercel frontend origin, without a trailing slash (for example, `https://your-project.vercel.app`). For multiple frontend domains, separate exact origins with commas. Do not include `/login` or `/api`.
 5. Deploy
 
 ---
 
 ## 📝 Frontend Integration
 
-In your frontend `.env`:
+In Vercel, set this environment variable for the frontend project and redeploy:
 ```
-VITE_API_URL=http://localhost:5000/api
+VITE_API_URL=https://your-render-service.onrender.com/api
 ```
+
+For this deployment, the values should be:
+
+- **Render `CLIENT_URL`:** `https://pg-management-8fb6fhlzr-pratikssms-projects.vercel.app`
+- **Vercel `VITE_API_URL`:** `https://staynest-backend-lslj.onrender.com/api`
+
+`CLIENT_URL` must match the frontend's browser origin exactly. If you also use a stable Vercel domain or another frontend domain, add it to `CLIENT_URL` separated by a comma. After changing environment variables, redeploy the affected service so the new configuration is loaded.
 
 Example API call:
 ```typescript

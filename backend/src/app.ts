@@ -20,7 +20,10 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     const allowedOrigins = [
-      env.clientUrl,
+      ...env.clientUrl
+        .split(',')
+        .map((url) => url.trim().replace(/\/$/, ''))
+        .filter(Boolean),
       'http://localhost:5173', // Local Vite dev server
       'http://localhost:3000', // Alternative dev port
       ...(env.isProd ? ['https://staynest.in'] : []), // Production domain
