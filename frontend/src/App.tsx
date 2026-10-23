@@ -15,6 +15,7 @@ import Register from './pages/Register'
 import Signup from './pages/Signup'
 import Booking from './pages/Booking'
 import Login from './pages/Login'
+import ForgotPassword from './pages/ForgotPassword'
 import AdminDashboard from './pages/AdminDashboard'
 import ResidentDashboard from './pages/ResidentDashboard'
 import Legal from './pages/Legal'
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/booking" element={<Booking />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/resident" element={<ResidentDashboard />} />
           <Route path="/legal/:type" element={<LegalWrapper />} />

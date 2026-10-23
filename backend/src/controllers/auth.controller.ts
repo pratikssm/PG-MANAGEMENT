@@ -5,7 +5,7 @@ import Otp from '../models/Otp';
 import { AuthRequest } from '../middleware/auth';
 import { ApiResponse, AppError, asyncHandler } from '../utils/ApiResponse';
 import { signToken } from '../utils/jwt';
-import { generateOtp, sendOtpEmail } from '../utils/email';
+import { generateOtp, sendOtpEmail, sendPasswordResetOtpEmail } from '../utils/email';
 import { env } from '../config/env';
 
 export const signup = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -16,7 +16,7 @@ export const signup = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (existing) throw new AppError('An account already exists for this email. Please log in.', 409);
 
   const challenge = await Otp.findOneAndUpdate(
-    { email, verifiedAt: { $ne: null }, consumedAt: null, expiresAt: { $gt: new Date() } },
+    { email, $or: [{ purpose: 'signup' }, { purpose: { $exists: false } }], verifiedAt: { $ne: null }, consumedAt: null, expiresAt: { $gt: new Date() } },
     { $set: { consumedAt: new Date() } },
     { new: true },
   );
@@ -72,6 +72,7 @@ export const requestOtp = asyncHandler(async (req: AuthRequest, res: Response) =
   }
   const recentlyRequested = await Otp.exists({
     email,
+    $or: [{ purpose: 'signup' }, { purpose: { $exists: false } }],
     createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
   });
   if (recentlyRequested) throw new AppError('Please wait before requesting another verification code.', 429);
@@ -81,12 +82,12 @@ export const requestOtp = asyncHandler(async (req: AuthRequest, res: Response) =
   const codeHash = hashOtp(email, salt, code);
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-  await Otp.deleteMany({ email });
-  await Otp.create({ email, codeHash, salt, expiresAt });
+  await Otp.deleteMany({ email, $or: [{ purpose: 'signup' }, { purpose: { $exists: false } }] });
+  await Otp.create({ email, purpose: 'signup', codeHash, salt, expiresAt });
 
   const sent = await sendOtpEmail(email, code);
   if (!sent) {
-    await Otp.deleteMany({ email });
+    await Otp.deleteMany({ email, purpose: 'signup' });
     throw new AppError('Email delivery is not configured or failed. Please contact the site administrator.', 503);
   }
   res.json(ApiResponse.ok('If this email is eligible, a verification code has been sent.'));
@@ -96,7 +97,7 @@ export const verifyOtp = asyncHandler(async (req: AuthRequest, res: Response) =>
   const email = String(req.body.email).trim().toLowerCase();
   const { otp } = req.body;
 
-  const record = await Otp.findOne({ email, consumedAt: null })
+  const record = await Otp.findOne({ email, $or: [{ purpose: 'signup' }, { purpose: { $exists: false } }], consumedAt: null })
     .select('+codeHash +salt')
     .sort({ createdAt: -1 });
   if (!record) throw new AppError('No active verification code found. Please request a new one.', 400);
@@ -131,8 +132,108 @@ export const verifyOtp = asyncHandler(async (req: AuthRequest, res: Response) =>
   res.json(ApiResponse.ok('Email verified. You can now create your account.'));
 });
 
+export const requestPasswordReset = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const email = String(req.body.email).trim().toLowerCase();
+  const user = await User.findOne({ email, isEmailVerified: true }).select('_id');
+
+  if (user) {
+    const recentlyRequested = await Otp.exists({
+      email,
+      purpose: 'password_reset',
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    });
+    if (recentlyRequested) {
+      res.json(ApiResponse.ok('If an account exists for this email, a password reset code has been sent.'));
+      return;
+    }
+
+    const code = generateOtp();
+    const salt = randomBytes(16).toString('hex');
+    const codeHash = hashOtp(email, salt, code);
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await Otp.deleteMany({ email, purpose: 'password_reset' });
+    await Otp.create({ email, purpose: 'password_reset', codeHash, salt, expiresAt });
+    if (!await sendPasswordResetOtpEmail(email, code)) {
+      await Otp.deleteMany({ email, purpose: 'password_reset' });
+    }
+  }
+
+  res.json(ApiResponse.ok('If an account exists for this email, a password reset code has been sent.'));
+});
+
+export const verifyPasswordResetOtp = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const email = String(req.body.email).trim().toLowerCase();
+  const { otp } = req.body;
+  const record = await Otp.findOne({ email, purpose: 'password_reset', consumedAt: null })
+    .select('+codeHash +salt')
+    .sort({ createdAt: -1 });
+
+  if (!record) throw new AppError('Invalid or expired reset code. Request a new code and try again.', 400);
+  if (record.expiresAt <= new Date()) {
+    await Otp.deleteOne({ _id: record._id });
+    throw new AppError('Invalid or expired reset code. Request a new code and try again.', 400);
+  }
+  if (record.verifiedAt) throw new AppError('This reset code has already been used.', 400);
+
+  const attempt = await Otp.findOneAndUpdate(
+    { _id: record._id, attempts: { $lt: 5 }, verifiedAt: null, consumedAt: null, expiresAt: { $gt: new Date() } },
+    { $inc: { attempts: 1 } },
+    { new: true },
+  ).select('+codeHash +salt');
+  if (!attempt) throw new AppError('Too many verification attempts. Request a new code.', 429);
+
+  const suppliedHash = Buffer.from(hashOtp(email, attempt.salt, otp), 'hex');
+  const expectedHash = Buffer.from(attempt.codeHash, 'hex');
+  if (suppliedHash.length !== expectedHash.length || !timingSafeEqual(suppliedHash, expectedHash)) {
+    if (attempt.attempts >= 5) await Otp.deleteOne({ _id: attempt._id });
+    throw new AppError(attempt.attempts >= 5 ? 'Too many verification attempts. Request a new code.' : 'Invalid or expired reset code.', attempt.attempts >= 5 ? 429 : 400);
+  }
+
+  const resetToken = randomBytes(32).toString('hex');
+  const resetTokenHash = hashResetToken(email, resetToken);
+  const verified = await Otp.findOneAndUpdate(
+    { _id: attempt._id, verifiedAt: null, consumedAt: null, expiresAt: { $gt: new Date() } },
+    { $set: { verifiedAt: new Date(), resetTokenHash }, $unset: { codeHash: 1, salt: 1 } },
+    { new: true },
+  );
+  if (!verified) throw new AppError('Invalid or expired reset code. Request a new code and try again.', 400);
+
+  res.json(ApiResponse.ok('Code verified. You can now choose a new password.', { resetToken }));
+});
+
+export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const email = String(req.body.email).trim().toLowerCase();
+  const resetTokenHash = hashResetToken(email, String(req.body.resetToken));
+  const challenge = await Otp.findOneAndUpdate(
+    {
+      email,
+      purpose: 'password_reset',
+      verifiedAt: { $ne: null },
+      consumedAt: null,
+      expiresAt: { $gt: new Date() },
+      resetTokenHash,
+    },
+    { $set: { consumedAt: new Date() }, $unset: { resetTokenHash: 1 } },
+    { new: true },
+  );
+  if (!challenge) throw new AppError('Reset session expired or already used. Request a new code.', 400);
+
+  const user = await User.findOne({ email, isEmailVerified: true }).select('+password');
+  if (!user) throw new AppError('Unable to reset password. Request a new code and try again.', 400);
+  user.password = req.body.password;
+  user.sessionVersion += 1;
+  await user.save();
+
+  res.json(ApiResponse.ok('Password reset successfully. You can now log in.'));
+});
+
 function hashOtp(email: string, salt: string, code: string): string {
   return createHmac('sha256', env.jwtSecret).update(`${email}:${salt}:${code}`).digest('hex');
+}
+
+function hashResetToken(email: string, token: string): string {
+  return createHmac('sha256', env.jwtSecret).update(`${email}:password-reset:${token}`).digest('hex');
 }
 
 function setCookie(res: Response, token: string) {

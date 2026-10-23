@@ -66,6 +66,9 @@ These demo accounts are created by `npm run seed` only when `NODE_ENV` is not `p
 | POST | `/otp/verify` | Public, rate-limited | Verify the one-time email code |
 | POST | `/signup` | Public, rate-limited | Create an account after email verification |
 | POST | `/login` | Public, rate-limited | Login with verified email/password |
+| POST | `/password/forgot` | Public, rate-limited | Request a password-reset OTP (generic response) |
+| POST | `/password/verify` | Public, rate-limited | Verify the password-reset OTP |
+| POST | `/password/reset` | Public, rate-limited | Set a new password using the verified reset session |
 | POST | `/logout` | Auth | Invalidate the current session and clear auth cookie |
 | GET | `/me` | Auth | Get current user |
 
@@ -205,6 +208,8 @@ These demo accounts are created by `npm run seed` only when `NODE_ENV` is not `p
 6. Demo admin/resident accounts are created only when running the seed script outside production. Create production admin accounts through a controlled deployment process.
 
 Passwords must be at least 8 characters and contain uppercase, lowercase, and numeric characters. OTPs expire after five minutes, are stored as keyed hashes, allow at most five verification attempts, and can be requested at most once per minute (with additional IP rate limits). On backend startup, legacy OTP records containing plaintext codes are deleted; other account, room, and registration data is untouched.
+
+Forgot-password requests send a six-digit code through the same configured email provider as signup. The API uses the same generic response whether or not an email has an eligible account; codes are single-use, and successful resets invalidate existing sessions.
 
 ---
 

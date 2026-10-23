@@ -30,14 +30,16 @@ export const loginSchema = z.object({
   role: z.enum(['resident', 'admin']).optional(),
 });
 
+const passwordSchema = z.string()
+  .min(8, 'Password must be at least 8 characters')
+  .regex(/[a-z]/, 'Password must include a lowercase letter')
+  .regex(/[A-Z]/, 'Password must include an uppercase letter')
+  .regex(/\d/, 'Password must include a number');
+
 export const signupSchema = z.object({
   name: z.string().trim().min(2, 'Name is required').max(100),
   email: z.string().trim().email('Valid email required').transform((value) => value.toLowerCase()),
-  password: z.string()
-    .min(8, 'Password must be at least 8 characters')
-    .regex(/[a-z]/, 'Password must include a lowercase letter')
-    .regex(/[A-Z]/, 'Password must include an uppercase letter')
-    .regex(/\d/, 'Password must include a number'),
+  password: passwordSchema,
   confirmPassword: z.string(),
 }).refine((value) => value.password === value.confirmPassword, {
   message: 'Passwords do not match',
@@ -52,6 +54,22 @@ export const otpRequestSchema = z.object({
 export const otpVerifySchema = z.object({
   email: z.string().trim().email('Valid email required').transform((value) => value.toLowerCase()),
   otp: z.string().regex(/^\d{6}$/, 'OTP must be 6 digits'),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email('Valid email required').transform((value) => value.toLowerCase()),
+});
+
+export const verifyPasswordResetOtpSchema = otpVerifySchema;
+
+export const resetPasswordSchema = z.object({
+  email: z.string().trim().email('Valid email required').transform((value) => value.toLowerCase()),
+  resetToken: z.string().regex(/^[a-f0-9]{64}$/i, 'Invalid or expired reset session'),
+  password: passwordSchema,
+  confirmPassword: z.string(),
+}).refine((value) => value.password === value.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
 });
 
 export const residentRegistrationSchema = z.object({

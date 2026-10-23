@@ -133,25 +133,28 @@ export async function sendOtpEmail(
   to: string,
   otp: string
 ): Promise<boolean> {
-  const safeEmail = to.replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  })[character]!);
+  return sendCodeEmail(to, otp, 'StayNest Email Verification', 'email verification');
+}
 
+export async function sendPasswordResetOtpEmail(
+  to: string,
+  otp: string
+): Promise<boolean> {
+  return sendCodeEmail(to, otp, 'StayNest Password Reset', 'password reset');
+}
+
+async function sendCodeEmail(to: string, otp: string, subject: string, purpose: string): Promise<boolean> {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #4f46e5;">StayNest Email Verification</h2>
-      <p>Your One-Time Password (OTP) for email verification is:</p>
+      <h2 style="color: #4f46e5;">${subject}</h2>
+      <p>Your One-Time Password (OTP) for ${purpose} is:</p>
       <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #4f46e5; text-align: center; padding: 20px; background: #f5f3ff; border-radius: 12px; margin: 20px 0;">${otp}</div>
       <p>This OTP is valid for 5 minutes. Do not share it with anyone.</p>
       <p style="color: #64748b; font-size: 13px; margin-top: 30px;">If you didn't request this, please ignore this email.</p>
     </div>
   `;
 
-  return sendEmail(to, 'StayNest - Your OTP Code', html);
+  return sendEmail(to, `StayNest - ${subject.replace('StayNest ', '')} OTP`, html);
 }
 
 export async function sendBroadcastEmail(
